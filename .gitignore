@@ -1,0 +1,22 @@
+# Dependencies and local runtime files
+node_modules/
+.env
+.env.*
+!.env.example
+
+# User uploads are runtime data; keep only the placeholder
+uploads/*
+!uploads/.gitkeep
+
+# Local logs, caches and OS files
+*.log
+npm-debug.log*
+.DS_Store
+Thumbs.db
+
+# Local backups and browser/test artifacts
+_backup*/
+*.bak
+playwright-report/
+test-results/
+screenshots/
