@@ -20,3 +20,4 @@ _backup*/
 playwright-report/
 test-results/
 screenshots/
+scripts/qa-browser-results.json
