@@ -176,21 +176,21 @@ When MongoDB is running at the configured `MONGODB_URI`:
 
 ## 6. How to Run Tests
 
-### Non-Database Test Suite (Can Be Executed Independently)
+### Standard Test Suite
 
-To run all non-database checks in one command:
+To run all automated verification checks in one command:
 
 ```bash
 npm test
 ```
 
-This command runs the following three test suites sequentially:
+This command runs the following five test suites sequentially:
 
 1. **Syntax & Structural Integrity (`npm run check`):**
    ```bash
    npm run check
    ```
-   Validates syntax across all 19 server and client JavaScript files.
+   Validates syntax across all 21 server, client, and utility JavaScript files.
 
 2. **Concurrency & Logout Safety (`npm run test:concurrency`):**
    ```bash
@@ -224,6 +224,18 @@ This command runs the following three test suites sequentially:
    - Image upload security: magic-byte validation for PNG, JPEG, and WebP, rejection of spoofed extensions, missing files, and unauthenticated requests.
    - Backup/restore schema integrity and rejection of malformed JSON.
    - Product form input validators (names, negative quantities, symbols, date formats).
+
+5. **Product CRUD & MongoDB Persistence (`npm run test:persistence`):**
+   ```bash
+   npm run test:persistence
+   ```
+   Verifies:
+   - Live MongoDB product creation with Mongoose.
+   - User-scoped inventory querying (`GET /api/products/inventory`).
+   - Product updates with database synchronization (`PUT /api/products/:id`).
+   - Multi-tenant account isolation (User B cannot modify User A's products).
+   - Product deletion (`DELETE /api/products/:id`).
+   - Master 112-product dataset preservation.
 
 ---
 
