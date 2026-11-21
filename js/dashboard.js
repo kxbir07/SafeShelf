@@ -1,22 +1,28 @@
 /**
- * SAFESHELF — dashboard.js
- * ------------------------------------------------------------
- * MEMBER 4 MODULE: Dashboard, Categories Explorer, Warranties,
- * Analytics, Notifications & App Navigation Router
- * ------------------------------------------------------------
- * Contains:
- *   - DashboardModule   -> stats widgets, inventory health, notifications,
- *                          triage boards, warranty tracking, and analytics
- *   - CategoriesModule  -> browsable category explorer grid
- *   - NavigationModule  -> 10-screen routing, search/filter wiring,
- *                          profile & logout handlers, modal control
- *   - MobileModule      -> responsive mobile drawer & bottom navigation
- *
- * Depends on: js/auth.js, js/inventory.js, js/features.js
- * Loaded LAST — its final block boots the whole application.
- * ------------------------------------------------------------
+ * ============================================================================
+ * SafeShelf V1 — Dashboard, Analytics & App Navigation (dashboard.js)
+ * ============================================================================
+ * Purpose:
+ *   The primary orchestration and analytical module for SafeShelf:
+ *     1. BackupModule: Exports and restores complete household JSON data backups.
+ *     2. NotificationState: Tracks user-dismissed alerts in localStorage.
+ *     3. DashboardModule: Computes KPI summary cards, freshness gauges, the
+ *        Expiry Tracker triage board, and the Appliance Warranty Ledger.
+ *     4. CategoriesModule: Renders the departmental product catalog explorer.
+ *     5. NavigationModule: Single-page application (SPA) client router that
+ *        switches between all 10 views without reloading the page.
+ *     6. MobileModule: Responsive mobile drawer and touch navigation.
+ *     7. Application Bootstrapper: Boots up SafeShelf on window load.
+ * ============================================================================
  */
 
+// ============================================================================
+// DATA BACKUP & RESTORE MODULE (BackupModule)
+// ----------------------------------------------------------------------------
+// Purpose:
+//   Allows users to export their entire household inventory, shopping list,
+//   and settings into a single downloadable JSON backup file, and restore it later.
+// ============================================================================
   const BackupModule = {
     exportCurrentUser() {
       const user = AuthModule.currentUser;
@@ -118,6 +124,18 @@
     }
   };
 
+// ============================================================================
+// DASHBOARD & ANALYTICS MODULE (DashboardModule)
+// ----------------------------------------------------------------------------
+// Purpose:
+//   Calculates metrics, health gauges, and dates:
+//     - Days remaining calculation with local-time parsing (protecting against
+//       calendar off-by-one errors across timezones).
+//     - Grouping provisions into Urgent (<=3 days), Upcoming (4-7 days), Safe (>7 days).
+//     - Tallying summary KPI cards (Total Provisions, Expiring Soon, Low Stock, Expired).
+//     - Appliance Warranty Ledger with active, expiring, and expired countdowns.
+//     - Category breakdown distribution and dynamic freshness health bar.
+// ============================================================================
   const DashboardModule = {
     // Calculates days remaining between today and target date with safe error handling
     getDaysRemaining(targetDateStr) {
@@ -804,9 +822,15 @@
   };
 
 
-  // ==========================================
-  // CATEGORIES HIERARCHY & EXPLORER MODULE
-  // ==========================================
+// ============================================================================
+// CATEGORIES EXPLORER MODULE (CategoriesModule)
+// ----------------------------------------------------------------------------
+// Purpose:
+//   Renders the interactive departmental browsing view:
+//     - Category chip filters (Fruits, Vegetables, Dairy, etc.)
+//     - Real-time catalog search filtering within categories
+//     - Item count badges and quick-add actions
+// ============================================================================
   const CategoriesModule = {
     activeCategoryFilter: 'all',
 
@@ -966,9 +990,16 @@
   };
 
 
-  // ==========================================
-  // NAVIGATION ROUTER (ALL 10 DEDICATED SCREENS)
-  // ==========================================
+// ============================================================================
+// CLIENT-SIDE APPLICATION ROUTER (NavigationModule)
+// ----------------------------------------------------------------------------
+// Purpose:
+//   Coordinates seamless single-page transitions across all 10 views:
+//     - Dashboard, Inventory, Shopping, Expiring, Categories, Warranties,
+//       Analytics, Profile, Notifications, and Settings.
+//   Updates sidebar and bottom-bar active states, closes open menus, and executes
+//   view-specific render logic on arrival.
+// ============================================================================
   const NavigationModule = {
     navigateToView(viewName, options = {}) {
       if (typeof MobileModule !== 'undefined') MobileModule.close();
@@ -1203,9 +1234,14 @@
   window.navigateToView = (view, options) => NavigationModule.navigateToView(view, options);
 
 
-  // ==========================================
-  // MOBILE NAVIGATION MODULE
-  // ==========================================
+// ============================================================================
+// MOBILE NAVIGATION MODULE (MobileModule)
+// ----------------------------------------------------------------------------
+// Purpose:
+//   Manages the sliding sidebar drawer and backdrop overlay on mobile viewports.
+//   Handles touch opening, overlay clicks to dismiss, and locking body scroll
+//   while the menu is active.
+// ============================================================================
   const MobileModule = {
     init() {
       this.menuBtn = document.getElementById('mobileMenuBtn');
@@ -1249,9 +1285,14 @@
     }
   };
 
-// ==========================================
-// APPLICATION BOOTSTRAP
-// ==========================================
+// ============================================================================
+// APPLICATION MASTER BOOTSTRAP
+// ----------------------------------------------------------------------------
+// Purpose:
+//   Runs once all scripts are loaded in the browser.
+//   Initializes modules in dependency order, mounts event listeners,
+//   computes initial dashboard metrics, and initiates background cloud sync.
+// ============================================================================
 NavigationModule.init();
 MobileModule.init();
 WebApiModule.init();
@@ -1260,7 +1301,7 @@ ShoppingListModule.init();
 DashboardModule.updateDashboardMetrics(products);
 InventoryModule.renderProductTable(products);
 
-// Background sync from MongoDB if logged in
+// Background cloud sync: if user has a valid JWT, sync latest inventory from MongoDB
 if (AuthModule.currentUser && localStorage.getItem('safeshelf_auth_token')) {
   StorageModule.syncFromServer().then(synced => {
     if (synced) {

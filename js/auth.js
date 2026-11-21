@@ -122,14 +122,18 @@ if (confirmModalCancelBtn) {
   });
 }
 
-// ==========================================
+// ============================================================================
 // SESSION STORAGE MODULE (Topic 23: Session Storage)
-// ------------------------------------------------------------
-// Tracks activity for the CURRENT BROWSER TAB ONLY. Unlike
-// localStorage (used by AuthModule/StorageModule below), this data
-// disappears the moment the tab/window is closed - perfect for
-// short-lived, non-critical session statistics.
-// ==========================================
+// ----------------------------------------------------------------------------
+// Purpose:
+//   Tracks temporary activity for the CURRENT BROWSER TAB ONLY using `sessionStorage`.
+//   Unlike `localStorage`, data saved here disappears automatically when the user
+//   closes this browser tab.
+//
+// Role in SafeShelf:
+//   Logs when the user opened this visit, how many items were added, and how
+//   many searches were performed, providing tab-scoped session metrics.
+// ============================================================================
 const SessionModule = {
   KEY: 'safeshelf_session_activity',
 
@@ -193,9 +197,17 @@ const SessionModule = {
   }
 };
 
-// ==========================================
-// AUTHENTICATION & USER PROFILE MODULE (Topics 15-24: Objects, DOM, Forms, localStorage)
-// ==========================================
+// ============================================================================
+// AUTHENTICATION & USER PROFILE MODULE (AuthModule)
+// ----------------------------------------------------------------------------
+// Purpose:
+//   Controls the client-side user account lifecycle:
+//     - Login and Registration forms with input validation
+//     - JWT token management and storage in `localStorage`
+//     - Switching between the Auth view (login/register) and Main App layout
+//     - Profile editing (updating name and email)
+//     - Secure logout with pending-sync verification and local cache cleanup
+// ============================================================================
 const AuthModule = {
   USERS_KEY: 'safeshelf_users',
   CURRENT_USER_KEY: 'safeshelf_current_user',
@@ -531,6 +543,24 @@ const AuthModule = {
   }
 };
 
+// ============================================================================
+// DATA PERSISTENCE & CLOUD SYNC MODULE (StorageModule)
+// ----------------------------------------------------------------------------
+// Purpose:
+//   The central data management engine for SafeShelf on the frontend.
+//
+// Key Responsibilities:
+//   1. Local-First Caching: Stores pantry items and shopping list entries in
+//      browser `localStorage` so the app works immediately, even with no network.
+//   2. Cloud Synchronization: Syncs data with the Express backend (/api/user-data
+//      and /api/products) whenever connected.
+//   3. Concurrency Protection (OCC): Uses integer versioning to detect when
+//      another browser tab or device saved newer data, preventing data loss.
+//   4. Visual Status Indicator: Updates the cloud sync badge in the top navigation
+//      (☁️ Synced, ☁️ Syncing…, ☁️ Offline, ⚠️ Conflict, ⚠️ Sync error).
+//   5. REST Operations: Provides async methods to fetch, create, update, and
+//      delete inventory items on the server.
+// ============================================================================
   const StorageModule = {
     STORAGE_KEY: 'safeshelf_inventory_data',
     SHOPPING_LIST_KEY: 'safeshelf_shopping_list',
@@ -818,6 +848,18 @@ const AuthModule = {
       }
     },
 
+    /**
+     * Downloads the latest user inventory and shopping list from MongoDB.
+     *
+     * How it works step-by-step:
+     *   1. Checks if the user is authenticated (reads JWT token and user ID).
+     *   2. Attempts to fetch provisions from `/api/products/inventory`.
+     *   3. Queries `/api/user-data` for the current shopping list and OCC version number.
+     *   4. Saves the fetched data into browser `localStorage` for instant offline access.
+     *   5. Updates the top-bar sync badge to "☁️ Synced" with the current time.
+     *
+     * @returns {Promise<boolean>} True if sync succeeded, false if offline or failed.
+     */
     async syncFromServer() {
       const token = localStorage.getItem('safeshelf_auth_token');
       if (!token) return false;
@@ -825,7 +867,7 @@ const AuthModule = {
       if (!uid) return false;
 
       try {
-        // Fetch inventory directly from MongoDB via /api/products/inventory
+        // Step 1: Fetch inventory directly from MongoDB via /api/products/inventory
         let inventoryItems = null;
         try {
           const prodRes = await fetch('/api/products/inventory', { headers: { Authorization: `Bearer ${token}` } });
@@ -837,13 +879,15 @@ const AuthModule = {
           }
         } catch (_) {}
 
+        // Step 2: Fetch shopping list and version from /api/user-data
         const response = await fetch('/api/user-data', { headers: { Authorization: `Bearer ${token}` } });
         if (response.status === 401) {
-          // Token expired or invalid
+          // Token expired or invalid: sign user out cleanly
           AuthModule.logout({ skipSync: true });
           return false;
         }
         if (response.status === 503) {
+          // MongoDB disconnected: mark status offline and keep local storage intact
           this.updateSyncUI('offline', 'MongoDB disconnected');
           return false;
         }
@@ -853,8 +897,10 @@ const AuthModule = {
         }
         const data = await response.json();
 
+        // Step 3: Record the server's OCC revision number
         this.setVersion(Number(data.version) || 0);
 
+        // Step 4: Write items into localStorage so the user can browse offline
         const itemsToSave = inventoryItems !== null ? inventoryItems : (data.inventory || []);
 
         const allProducts = JSON.parse(localStorage.getItem(this.STORAGE_KEY) || '[]').filter(p => p.userId !== uid);
@@ -866,6 +912,7 @@ const AuthModule = {
         raw[uid] = data.shoppingList || [];
         localStorage.setItem(this.SHOPPING_LIST_KEY, JSON.stringify(raw));
 
+        // Step 5: Update sync badge to "☁️ Synced"
         const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
         this.updateSyncUI('saved', timeStr);
         return true;
@@ -876,6 +923,23 @@ const AuthModule = {
       }
     },
 
+    /**
+     * Uploads local pantry and shopping list changes to MongoDB.
+     * Uses Optimistic Concurrency Control (OCC) to protect against overwriting data.
+     *
+     * How it works step-by-step:
+     *   1. If another sync request is already in-flight, queues the latest changes in `pendingSync`.
+     *   2. Reads the current local revision number (`this.getVersion()`).
+     *   3. Sends `PUT /api/user-data` with { inventory, shoppingList, version }.
+     *   4. Handles response:
+     *      - 409 Conflict: Another device saved first; prompts user to load cloud or keep local.
+     *      - 503 Offline: Database disconnected; data remains safely in browser localStorage.
+     *      - 200 OK: Advances version number and flushes any queued changes.
+     *
+     * @param {Array<Object>} inventory - Current pantry items array.
+     * @param {Array<Object>} shoppingList - Current shopping items array.
+     * @returns {Promise<Object>} Status object { ok: boolean, status: string, version?: number }.
+     */
     async syncToServer(inventory, shoppingList) {
       const token = localStorage.getItem('safeshelf_auth_token');
       if (!token || !AuthModule.currentUser) {

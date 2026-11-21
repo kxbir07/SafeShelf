@@ -1,3 +1,24 @@
+/**
+ * ============================================================================
+ * SafeShelf V1 — Product Catalog & Inventory CRUD Routes (products.js)
+ * ============================================================================
+ * Purpose:
+ *   Manages two main types of product data:
+ *     1. Master Catalog: Searchable pantry items for auto-complete and catalog browsing.
+ *        Sources include local 112-item dataset (data/products.json) and optional
+ *        external enrichment from DummyJSON, with a 30-minute in-memory cache.
+ *     2. User Inventory CRUD: Allows authenticated users to create, view, update,
+ *        and delete items in their personal pantry ledger.
+ *
+ * Key Architectural Highlights:
+ *   - Offline Resilience: Catalog browsing and categories work even if MongoDB is offline.
+ *   - Multi-Tenant Isolation: Queries enforce `userId: req.user.sub` so users
+ *     can only access and modify their own inventory items.
+ *   - Dual-Sync Architecture: Automatically keeps `products` collection and legacy
+ *     `UserData.inventory` array synchronized for complete backward compatibility.
+ * ============================================================================
+ */
+
 const express = require('express');
 const mongoose = require('mongoose');
 const Product = require('../models/Product');
@@ -6,8 +27,22 @@ const auth = require('../middleware/auth');
 const localProducts = require('../../data/products.json');
 
 const router = express.Router();
+
+/**
+ * Helper: Normalizes a string for clean, accent-free text comparison.
+ *
+ * @param {string} s - Input text.
+ * @returns {string} Lowercase string with accents removed and non-alphanumeric chars replaced by spaces.
+ */
 const norm = s => String(s || '').normalize('NFKD').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
 
+/**
+ * Normalizes an external API product object (e.g. from DummyJSON)
+ * into SafeShelf's unified product schema.
+ *
+ * @param {Object} p - Raw product object from external API.
+ * @returns {Object|null} Standardized SafeShelf product object, or null if invalid.
+ */
 function normalizeApi(p) {
   const name = String(p.title || p.name || '').trim();
   if (!name) return null;
@@ -31,15 +66,24 @@ function normalizeApi(p) {
   };
 }
 
+// In-memory cache for external third-party catalog items
 let externalCache = {
   data: null,
   timestamp: 0
 };
-const EXTERNAL_CACHE_TTL_MS = 30 * 60 * 1000; // 30 minutes
+const EXTERNAL_CACHE_TTL_MS = 30 * 60 * 1000; // 30 minutes Time-To-Live (TTL)
 
+/**
+ * Fetches and caches product items from external catalog (DummyJSON).
+ * Avoids outbound network latency on repeated requests by serving from cache.
+ *
+ * @returns {Promise<Array<Object>>} Array of normalized external catalog items.
+ */
 async function externalProducts() {
   if (process.env.EXTERNAL_PRODUCTS_ENABLED === 'false') return [];
   const now = Date.now();
+
+  // Return cached results if still fresh within the 30-minute window
   if (externalCache.data && (now - externalCache.timestamp) < EXTERNAL_CACHE_TTL_MS) {
     return externalCache.data;
   }
@@ -52,6 +96,7 @@ async function externalProducts() {
     externalCache = { data: normalized, timestamp: now };
     return normalized;
   } catch (e) {
+    // If fetch fails but we have stale cached data, gracefully return stale cache
     if (externalCache.data) {
       console.warn('External product fetch failed; returning cached external catalog:', e.message);
       return externalCache.data;
@@ -60,6 +105,12 @@ async function externalProducts() {
   }
 }
 
+/**
+ * Standardizes a MongoDB product document into a client-safe inventory response object.
+ *
+ * @param {Object} doc - Raw Mongoose document or lean JavaScript object.
+ * @returns {Object|null} Formatted inventory item with consistent id, status, and dates.
+ */
 function formatInventoryProduct(doc) {
   if (!doc) return null;
   const id = doc._id ? doc._id.toString() : (doc.id || doc.customId || '');
@@ -84,9 +135,13 @@ function formatInventoryProduct(doc) {
   };
 }
 
-// ----------------------------------------------------
-// 1. GET /categories - Category aggregations
-// ----------------------------------------------------
+// ----------------------------------------------------------------------------
+// 1. GET /api/products/categories
+// ----------------------------------------------------------------------------
+// Returns an aggregated list of product categories along with item counts.
+// Example response: [{ name: "Fruits", count: 17 }, { name: "Vegetables", count: 23 }]
+// If MongoDB is connected, performs an aggregation pipeline on the database.
+// If MongoDB is offline, falls back to computing counts from local JSON.
 router.get('/categories', async (req, res, next) => {
   try {
     let items = localProducts;
@@ -102,15 +157,18 @@ router.get('/categories', async (req, res, next) => {
         console.warn('Mongo product categories query unavailable; using local dataset:', dbErr.message);
       }
     }
+    // Offline fallback: tally counts directly from the local JSON array
     const counts = {};
     items.forEach(p => counts[p.category] = (counts[p.category] || 0) + 1);
     res.json(Object.keys(counts).sort().map(name => ({ name, count: counts[name] })));
   } catch (e) { next(e); }
 });
 
-// ----------------------------------------------------
-// 2. GET /inventory - List user's inventory products from MongoDB
-// ----------------------------------------------------
+// ----------------------------------------------------------------------------
+// 2. GET /api/products/inventory
+// ----------------------------------------------------------------------------
+// Protected endpoint: returns all pantry provisions belonging to the authenticated user.
+// Enforces multi-tenant isolation: only returns items where userId matches req.user.sub.
 router.get('/inventory', auth, async (req, res, next) => {
   try {
     if (!req.app.locals.mongoReady) {
@@ -154,9 +212,14 @@ router.get('/inventory', auth, async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
-// ----------------------------------------------------
-// 3. GET / - Catalogue listing (searches local dataset + DummyJSON cache)
-// ----------------------------------------------------
+// ----------------------------------------------------------------------------
+// 3. GET /api/products
+// ----------------------------------------------------------------------------
+// Searchable catalogue listing.
+// Supports query parameters:
+//   - ?q=keyword      (fuzzy search on name, brand, description)
+//   - ?category=name  (filter by department)
+// Merges local bundled items with external API items while suppressing duplicates.
 router.get('/', async (req, res, next) => {
   try {
     // If request explicitly asks for inventory products and has auth
@@ -211,9 +274,15 @@ router.get('/', async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
-// ----------------------------------------------------
-// 4. POST / (and /inventory) - Create a new inventory product in MongoDB
-// ----------------------------------------------------
+// ----------------------------------------------------------------------------
+// 4. POST /api/products/inventory (and POST /api/products)
+// ----------------------------------------------------------------------------
+// Creates a new custom inventory provision in MongoDB for the logged-in user.
+// Validates:
+//   - Product name (required, max 100 characters)
+//   - Product category (required)
+//   - Sanitizes quantity, dates, description, and photo URL
+// Automatically syncs the new item with legacy UserData.inventory for compatibility.
 async function handleCreateProduct(req, res, next) {
   try {
     if (!req.app.locals.mongoReady) {
@@ -293,9 +362,11 @@ async function handleCreateProduct(req, res, next) {
 router.post('/inventory', auth, handleCreateProduct);
 router.post('/', auth, handleCreateProduct);
 
-// ----------------------------------------------------
-// 5. GET /:id - Retrieve single product by id
-// ----------------------------------------------------
+// ----------------------------------------------------------------------------
+// 5. GET /api/products/:id
+// ----------------------------------------------------------------------------
+// Retrieves single product by its MongoDB _id, customId, or dataset ID.
+// Checks MongoDB first; if not found or DB is offline, checks local JSON catalog.
 router.get('/:id', async (req, res, next) => {
   try {
     const id = req.params.id;
@@ -320,9 +391,12 @@ router.get('/:id', async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
-// ----------------------------------------------------
-// 6. PUT /:id (and /inventory/:id) - Update inventory product in MongoDB
-// ----------------------------------------------------
+// ----------------------------------------------------------------------------
+// 6. PUT /api/products/:id (and PUT /api/products/inventory/:id)
+// ----------------------------------------------------------------------------
+// Updates an existing pantry inventory item in MongoDB.
+// Multi-tenant security check: query must match `userId: req.user.sub`.
+// If user B tries to update user A's product, the filter returns null (HTTP 404).
 async function handleUpdateProduct(req, res, next) {
   try {
     if (!req.app.locals.mongoReady) {
@@ -394,9 +468,11 @@ async function handleUpdateProduct(req, res, next) {
 router.put('/inventory/:id', auth, handleUpdateProduct);
 router.put('/:id', auth, handleUpdateProduct);
 
-// ----------------------------------------------------
-// 7. DELETE /:id (and /inventory/:id) - Delete inventory product from MongoDB
-// ----------------------------------------------------
+// ----------------------------------------------------------------------------
+// 7. DELETE /api/products/:id (and DELETE /api/products/inventory/:id)
+// ----------------------------------------------------------------------------
+// Removes an inventory provision from MongoDB for the authenticated user.
+// Strictly checks `userId: req.user.sub` so users cannot delete others' items.
 async function handleDeleteProduct(req, res, next) {
   try {
     if (!req.app.locals.mongoReady) {

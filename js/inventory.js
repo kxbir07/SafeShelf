@@ -1,18 +1,26 @@
 /**
- * SAFESHELF — inventory.js
- * ------------------------------------------------------------
- * MEMBER 2 MODULE: Product Catalog & Inventory Management
- * ------------------------------------------------------------
- * Contains:
- *   - CatalogStore    -> built-in product/category dataset (Topics 15-16: Objects, JSON)
- *   - InventoryModule -> CRUD table, search/filter/sort, form handling,
- *                         the product details modal (Topics 9-14, 17-22)
- *
- * Depends on: js/auth.js (shared state, AuthModule, StorageModule)
- * Loaded after auth.js, before features.js and dashboard.js.
- * ------------------------------------------------------------
+ * ============================================================================
+ * SafeShelf V1 — Inventory & Catalog Management (inventory.js)
+ * ============================================================================
+ * Purpose:
+ *   Handles pantry provision operations and UI rendering:
+ *     1. CatalogStore: Built-in taxonomy of pantry departments, icons, and items.
+ *     2. InventoryModule: Full CRUD management for pantry provisions:
+ *        - Rendering Table View and Retail Grid View.
+ *        - Client-side search, category filter, and expiration status filter.
+ *        - Column sorting with ascending/descending indicators.
+ *        - Sliding Add/Edit Drawer with camera/file upload support.
+ *        - Product Details Modal with shelf-life status badges.
+ * ============================================================================
  */
 
+// ============================================================================
+// BUILT-IN PANTRY CATALOG STORE (CatalogStore)
+// ----------------------------------------------------------------------------
+// Purpose:
+//   Provides the reference departmental structure (Fruits, Dairy, Cleaning, etc.)
+//   used by SafeShelf when offline or for category autocomplete.
+// ============================================================================
   const CatalogStore = {
     categories: [
       {
@@ -558,7 +566,21 @@
   };
 
 
-  // Helper to resolve real product image or match from CatalogStore
+  /**
+   * Resolves a photo URL for any provision or shopping list item.
+   *
+   * Beginner explanation of the 5-step fallback hierarchy:
+   *   1. Direct property: Checks if the item already has an `imageUrl` or `image`.
+   *   2. Linked product: If it's a shopping item linked to an inventory item (`productId`),
+   *      borrows the image from that inventory item.
+   *   3. Catalog link: If linked to a master catalog ID (`catalogProductId`), looks it up.
+   *   4. Name matching: Searches the user's inventory for an item with the same name.
+   *   5. Built-in keywords: Matches common food names (apple, milk, bread, etc.)
+   *      to high-res photos bundled in the `images/` directory.
+   *
+   * @param {Object} item - Product or shopping list item.
+   * @returns {string|null} Resolved image path/URL or null if no match found.
+   */
   function resolveProductImage(item) {
     if (!item) return null;
 
@@ -697,6 +719,16 @@
     return matchesSearch && matchesCategory && matchesStatus;
   }
 
+// ============================================================================
+// PANTRY INVENTORY MANAGEMENT MODULE (InventoryModule)
+// ----------------------------------------------------------------------------
+// Purpose:
+//   Manages the interactive pantry inventory UI:
+//     - Renders both Table View (tabular ledger) and Grid View (visual cards).
+//     - Applies multi-criteria filtering (search query, category, status).
+//     - Handles row actions: View Details, Edit Item, and Delete Provision.
+//     - Controls the sliding Add/Edit Drawer and validates form inputs.
+// ============================================================================
   const InventoryModule = {
     currentViewMode: 'table', // 'table' | 'grid'
 

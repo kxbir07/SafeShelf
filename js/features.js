@@ -1,20 +1,25 @@
 /**
- * SAFESHELF — features.js
- * ------------------------------------------------------------
- * MEMBER 3 MODULE: Smart Features — REST API Integration & Shopping List
- * ------------------------------------------------------------
- * Contains:
- *   - WebApiModule      -> fetch() + async/await REST API consumption
- *                           (DummyJSON public API) with graceful fallback
- *                           to CatalogStore, and error handling (Topics 25-30)
- *   - ShoppingListModule -> auto-generated + manually-added shopping list,
- *                           built with array methods (Topics 11-14)
- *
- * Depends on: js/auth.js, js/inventory.js
- * Loaded after inventory.js, before dashboard.js.
- * ------------------------------------------------------------
+ * ============================================================================
+ * SafeShelf V1 — Features, Catalog API & Shopping List (features.js)
+ * ============================================================================
+ * Purpose:
+ *   Contains three core feature modules:
+ *     1. WebApiModule: Integrates with REST API endpoints for catalog product
+ *        search, category classification, and offline fallback.
+ *     2. ShoppingListModule: Automated grocery list engine with low-stock
+ *        auto-detection, manual additions, and purchase state tracking.
+ *     3. EmailModule: Client-side email notifications via EmailJS SDK for low-stock alerts.
+ * ============================================================================
  */
 
+// ============================================================================
+// REST API & CATALOG SEARCH MODULE (WebApiModule)
+// ----------------------------------------------------------------------------
+// Purpose:
+//   Connects the "Add Provision" slide drawer search bar to the catalog API.
+//   Allows users to search for provisions (e.g. "Honey", "Apples") and pre-fill
+//   forms with photos, descriptions, and category mappings.
+// ============================================================================
   const WebApiModule = {
     selectedCategory: 'All',
 
@@ -391,6 +396,21 @@
   };
 
 
+// ============================================================================
+// SMART SHOPPING LIST MODULE (ShoppingListModule)
+// ----------------------------------------------------------------------------
+// Purpose:
+//   Manages the household grocery and procurement list.
+//
+// Key Responsibilities:
+//   1. Auto-Detection: Automatically detects provisions in inventory with
+//      quantity <= 1 or out-of-stock, generating shopping items with source 'auto'.
+//   2. Suppression Tracking: When a user checks off and clears an auto-item,
+//      it is suppressed from reappearing until inventory stock is modified.
+//   3. Manual Additions: Users can type quick grocery items and specify units.
+//   4. Image Resolution: Attaches product photos to shopping entries automatically.
+//   5. Print & Export: Supports browser printing (@media print) and CSV export.
+// ============================================================================
   const ShoppingListModule = {
     LOW_STOCK_THRESHOLD: 1,
     SUPPRESSED_KEY: 'safeshelf_shopping_suppressed',
@@ -524,7 +544,19 @@
       return merged;
     },
 
-    // Synchronizes inventory items into the user's shopping list
+    /**
+     * Synchronizes pantry provisions with the user's shopping list.
+     *
+     * How it works step-by-step:
+     *   1. Separates existing list into 'manual' items (user typed) and 'auto' items (system generated).
+     *   2. Pruning: If an inventory item was deleted, removes its corresponding auto-generated shopping entry.
+     *   3. Image Backfill: Borrows photos from updated inventory items so thumbnails never break.
+     *   4. Low-Stock Detection: Scans inventory for items with quantity <= 1 or out-of-stock.
+     *      Adds them to the shopping list unless the user explicitly suppressed them.
+     *   5. Merges manual and auto items, saves to localStorage, and updates cloud sync.
+     *
+     * @param {Array<Object>} productsList - Active pantry inventory provisions.
+     */
     syncShoppingList(productsList) {
       if (!AuthModule.currentUser) return;
       const currentItems = this.getShoppingList();
@@ -967,10 +999,19 @@
 
   // ==========================================
   // EMAIL NOTIFICATION MODULE (EmailJS API)
-  // ------------------------------------------------------------
-  // Sends low-stock household inventory alerts directly from the
-  // client using EmailJS SDK. No Node.js backend required.
-  // ------------------------------------------------------------
+// ============================================================================
+// EMAIL NOTIFICATION MODULE (EmailModule)
+// ----------------------------------------------------------------------------
+// Purpose:
+//   Sends low-stock household inventory alerts directly to the user's email
+//   using the client-side EmailJS browser SDK.
+//
+// How it works:
+//   1. Verifies the user is logged in with a valid email address.
+//   2. Checks whether EmailJS credentials are configured (or warns if placeholders).
+//   3. Gathers all items marked "Low Stock" or "Out of Stock".
+//   4. Calls `emailjs.send()` with formatted HTML/text template variables.
+// ============================================================================
   const EmailModule = {
     // Builds the list of low-stock / out-of-stock items to email
     getLowStockItemsForEmail() {
