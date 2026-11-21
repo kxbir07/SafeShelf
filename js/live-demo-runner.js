@@ -1,8 +1,30 @@
 /**
- * SafeShelf Live Interactive Demo Runner
- * Runs directly inside the user's active browser window so they can watch the live demonstration.
+ * ============================================================================
+ * SafeShelf V1 — Live Interactive Demo Runner (live-demo-runner.js)
+ * ============================================================================
+ * Purpose:
+ *   Provides an automated, interactive tour of SafeShelf directly inside
+ *   the user's browser.
+ *
+ * How it works:
+ *   1. Injects a stylish floating widget in the bottom-right corner of the screen.
+ *   2. When started (either by clicking "Start Live Demo" or via `?demo=auto` in URL),
+ *      it steps through the app in real time:
+ *        - Step 1: Logs into demo account with realistic keystroke animations.
+ *        - Step 2: Explores dashboard KPI metrics and recent pantry ledger items.
+ *        - Step 3: Navigates to Inventory, opens the slide drawer, and adds an item.
+ *        - Step 4: Searches the catalog for "honey" using client-side filtering.
+ *        - Step 5: Adds a grocery item to the Shopping List and checks it off.
+ *        - Step 6: Shows household settings and notification preferences.
+ *        - Step 7: Deletes the test item and returns smoothly to Dashboard.
+ * ============================================================================
  */
+
 (function() {
+  /**
+   * Creates and mounts the floating demo widget into the DOM.
+   * Renders the glassmorphism card, status indicators, and control buttons.
+   */
   function createDemoUI() {
     if (document.getElementById('safeShelfDemoWidget')) return;
 
@@ -33,10 +55,12 @@
     `;
     document.body.appendChild(widget);
 
+    // Dismiss widget button
     document.getElementById('closeDemoWidgetBtn').addEventListener('click', () => {
       widget.style.display = 'none';
     });
 
+    // Start demo button
     document.getElementById('startLiveDemoBtn').addEventListener('click', () => {
       runInteractiveDemo();
     });
@@ -48,6 +72,12 @@
     }
   }
 
+  /**
+   * Updates the text displayed on the floating demo badge.
+   *
+   * @param {string} title - Primary action heading.
+   * @param {string} subtitle - Explanatory detail of the current action.
+   */
   function setStatus(title, subtitle) {
     const statusText = document.getElementById('demoStatusText');
     const subText = document.getElementById('demoSubText');
@@ -55,8 +85,16 @@
     if (subText) subText.textContent = subtitle;
   }
 
+  // Promise-based delay helper for pacing animations
   const delay = ms => new Promise(r => setTimeout(r, ms));
 
+  /**
+   * Simulates realistic human typing into an HTML input field.
+   * Fires 'input' and 'change' events so reactive listeners update properly.
+   *
+   * @param {HTMLInputElement} input - Target text input element.
+   * @param {string} text - String to type character by character.
+   */
   async function typeInto(input, text) {
     input.focus();
     input.value = '';
@@ -68,6 +106,9 @@
     input.dispatchEvent(new Event('change', { bubbles: true }));
   }
 
+  /**
+   * Main async execution orchestrator for the live tour.
+   */
   async function runInteractiveDemo() {
     const startBtn = document.getElementById('startLiveDemoBtn');
     if (startBtn) {
@@ -77,7 +118,9 @@
     }
 
     try {
-      // STEP 1: LOGIN (if not logged in)
+      // ----------------------------------------------------------------------
+      // STEP 1: LOGIN (if not currently authenticated)
+      // ----------------------------------------------------------------------
       const token = localStorage.getItem('safeshelf_auth_token');
       const authVisible = document.getElementById('authContainer')?.offsetParent !== null;
 
@@ -99,7 +142,9 @@
         }
       }
 
-      // STEP 2: DASHBOARD
+      // ----------------------------------------------------------------------
+      // STEP 2: DASHBOARD OVERVIEW
+      // ----------------------------------------------------------------------
       setStatus('Step 2: Dashboard Overview', 'Real-time KPI metrics & urgent provisions monitoring');
       window.scrollTo({ top: 0, behavior: 'smooth' });
       await delay(1500);
@@ -108,7 +153,9 @@
       window.scrollTo({ top: 0, behavior: 'smooth' });
       await delay(1000);
 
+      // ----------------------------------------------------------------------
       // STEP 3: INVENTORY NAVIGATION & ADD ITEM
+      // ----------------------------------------------------------------------
       setStatus('Step 3: Inventory Management', 'Navigating to provisions catalog & opening slide drawer');
       const invNav = document.querySelector('.nav-item[data-view="inventory"]');
       if (invNav) invNav.click();
@@ -147,7 +194,9 @@
       if (submitBtn) submitBtn.click();
       await delay(2200);
 
+      // ----------------------------------------------------------------------
       // STEP 4: CATALOG SEARCH
+      // ----------------------------------------------------------------------
       setStatus('Step 5: Catalog Search Engine', 'Searching 112+ curated provisions for "honey"');
       if (addBtn) addBtn.click();
       await delay(1200);
@@ -163,7 +212,9 @@
       if (cancelBtn) cancelBtn.click();
       await delay(1200);
 
+      // ----------------------------------------------------------------------
       // STEP 5: SHOPPING LIST OPERATIONS
+      // ----------------------------------------------------------------------
       setStatus('Step 6: Shopping List Operations', 'Adding grocery item and toggling purchased state');
       const shopNav = document.querySelector('.nav-item[data-view="shopping"]');
       if (shopNav) shopNav.click();
@@ -190,18 +241,22 @@
         await delay(2000);
       }
 
+      // ----------------------------------------------------------------------
       // STEP 6: PROFILE SETTINGS
+      // ----------------------------------------------------------------------
       setStatus('Step 7: Household Settings', 'Exploring pantry profile and notification preferences');
       const profileNav = document.querySelector('.nav-item[data-view="profile"]');
       if (profileNav) profileNav.click();
       await delay(2500);
 
+      // ----------------------------------------------------------------------
       // STEP 7: RETURN TO DASHBOARD & CLEANUP
+      // ----------------------------------------------------------------------
       setStatus('Step 8: Return to Dashboard', 'Syncing states and concluding live demonstration');
       if (invNav) invNav.click();
       await delay(1000);
 
-      // Clean up sample item
+      // Delete the temporary provision created during the demo
       const rows = document.querySelectorAll('#productTableBody tr');
       for (let r of rows) {
         if (r.textContent.includes(sampleItem)) {
@@ -239,7 +294,7 @@
     }
   }
 
-  // Initialize once DOM is ready
+  // Mount widget when DOM is ready
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', createDemoUI);
   } else {
